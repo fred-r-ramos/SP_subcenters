@@ -8,6 +8,8 @@ library(spgwr)
 library(McSpatial)
 library(boot)
 library(RANN)
+library(plotly)
+library(leaflet)
 
 
 setwd("C:/Users/fred/Dropbox/000_subcenters/OD2007_Dados")
@@ -30,12 +32,16 @@ plot (zonas_OD["job_density"])
 
 # creating a dataset without zeros and the log of job density#
 
-zonas_OD_temp <- zonas_OD %>% select(Empregos,Area_ha,job_density, pop_density) %>% filter(job_density>0) %>% mutate(job_density_log=log(job_density))
+zonas_OD_temp <- zonas_OD %>% select(Empregos,Area_ha,job_density,pop_density) %>% filter(job_density>0) %>% filter(pop_density>0) %>% mutate(pop_density_log=log(pop_density),job_density_log=log(job_density))
 
+
+print(zonas_OD_temp)
 plot(zonas_OD_temp)
 
 summary(zonas_OD_temp$job_density)
 summary(zonas_OD_temp$job_density_log)
+summary(zonas_OD_temp$pop_density)
+sapply(zonas_OD_temp, typeof)
 
 # converting to centroids #
 zonas_OD_P <- st_centroid(zonas_OD_temp)
@@ -64,11 +70,52 @@ plot(variog)
 print(zonas_OD_P_sp)
 
 
+sp_data <- zonas_OD_P_sp@data
+
+sp_data[,c("x","y")] <- coordinates(zonas_OD_P_sp)
+
+write.csv(sp_data,"sp_data.csv")
 
 
 
+# calculating the bandwidth for the GWR #
 
-# a partir daqui tenho que comeÁar a pensar melhor no que fazer pois#
+bw.gwr(job_density_log~distances+pop_density_log,data=zonas_OD_P_sp, kernel="tricube")
+
+# calculating GWR model #
+
+gwr_out <- gwr.basic(job_density_log~distances+pop_density_log,data=zonas_OD_P_sp,kernel="gaussian",bw=21000)
+gwr_out_map <- gwr_out$SDF
+print(gwr_out_map)
+
+
+ 
+gwr_out_map_sf <- as(gwr_out_map,"sf")
+ggplot(gwr_out_map_sf)+geom_sf(aes(color=residual),size=0.1,alpha=0.7) + theme_classic()+scale_color_gradient2(low ="#4d4d4d" , high = "#b2182b", mid = "white", midpoint = 0)
+
+gwr_out_map_sf_test <- gwr_out_map_sf %>% mutate(sig=ifelse(Stud_residual>1.96,"red",ifelse(Stud_residual>1.5,"orange","white")))
+#gwr_out_map_sf_test <- gwr_out_map_sf_test %>% filter(sig>0)
+
+ggplot(gwr_out_map_sf_test)+geom_sf(aes(color=sig),size=0.1) + theme_classic()
+?scale_color_discrete
+
+
+
+gwr_out_map <- spTransform(gwr_out_map, CRS("+proj=longlat +datum=WGS84"))
+gwr_out_map@data[,c("long","lat")] <- coordinates(gwr_out_map)
+
+leaflet() %>% addTiles() %>% addMarkers(data=gwr_out_map[gwr_out_map$Stud_residual>1.70,],lat=~lat,lng=~long)
+
+# fui at√© aqui .... ####
+
+
+library(plotly)
+
+plot_ly(data=gwr_out_map@data,x=gwr_out_map@data$long,y=gwr_out_map@data$lat,z=gwr_out_map@data$yhat)
+plot_ly(data=gwr_out_map@data,x=gwr_out_map@data$long,y=gwr_out_map@data$lat,z=gwr_out_map@data$yhat,color=gwr_out_map@data$yhat,type="surface")
+
+
+
 
 plot(zonas_OD_P_sp)
 zonas_OD_P_sp$job_density_log
@@ -103,6 +150,9 @@ hist((zonas_OD_P_sp$job_density_log - gwr_test_map$pred)/gwr_test_map$pred.se)
 hist((zonas_OD_P_sp$job_density_log - lwr_test$yhat)/lwr_test$yhat.se)
 
 ?lwr
+
+
+
 # calculating gwr #
 
 
